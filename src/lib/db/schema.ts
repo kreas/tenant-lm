@@ -21,7 +21,7 @@ export const submissions = sqliteTable("submissions", {
   leadMagnetId: text("lead_magnet_id")
     .notNull()
     .references(() => leadMagnets.id),
-  email: text("email").notNull(),
+  email: text("email"),
   name: text("name"),
   data: text("data"), // JSON string for any extra form fields
   createdAt: integer("created_at", { mode: "timestamp" })

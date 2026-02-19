@@ -7,11 +7,11 @@ import { v4 as uuidv4 } from "uuid";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { slug, email, name, ...extraFields } = body;
+    const { slug, data } = body;
 
-    if (!slug || !email) {
+    if (!slug) {
       return NextResponse.json(
-        { error: "slug and email are required" },
+        { error: "slug is required" },
         { status: 400 }
       );
     }
@@ -38,19 +38,23 @@ export async function POST(request: NextRequest) {
     }
 
     const id = uuidv4();
+    const formData = typeof data === "object" && data !== null ? data : {};
+
+    // Extract email/name from form data if present
+    const email = formData.email || formData.Email || null;
+    const name = formData.name || formData.Name || formData.full_name || formData.fullName || null;
+
+    console.log(`[submission] slug=${slug} lead_magnet=${lm[0].name}`, formData);
+
     await db.insert(submissions).values({
       id,
       leadMagnetId: lm[0].id,
       email,
-      name: name || null,
-      data: Object.keys(extraFields).length > 0
-        ? JSON.stringify(extraFields)
-        : null,
+      name,
+      data: JSON.stringify(formData),
       createdAt: new Date(),
     });
 
-    // Return success — the lead magnet page JS can handle
-    // showing a download link or redirect
     return NextResponse.json({ success: true, id });
   } catch (error) {
     console.error("Submission error:", error);
