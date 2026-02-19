@@ -53,8 +53,19 @@ export async function POST(request: NextRequest) {
     const zip = new AdmZip(buffer);
     const entries = zip.getEntries();
 
+    // Junk patterns to ignore (macOS, Windows artifacts)
+    const JUNK_PATTERNS = ["__MACOSX/", ".DS_Store", "Thumbs.db", "desktop.ini"];
+    function isJunk(entryName: string): boolean {
+      return JUNK_PATTERNS.some(
+        (p) => entryName === p || entryName.startsWith(p) || entryName.includes("/" + p)
+      );
+    }
+
+    // Filter to meaningful entries only
+    const meaningful = entries.filter((e) => !isJunk(e.entryName));
+
     // Security: validate entries before extracting
-    for (const entry of entries) {
+    for (const entry of meaningful) {
       const entryPath = entry.entryName;
       if (entryPath.includes("..") || path.isAbsolute(entryPath)) {
         return NextResponse.json(
@@ -64,28 +75,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Find if there's a root directory wrapper in the ZIP
-    // (common when zipping a folder — all files are under one dir)
+    // Find the directory that contains index.html
+    // This handles wrapper directories at any depth
     let stripPrefix = "";
-    const topLevelDirs = new Set<string>();
-    const topLevelFiles = new Set<string>();
-    for (const entry of entries) {
-      const parts = entry.entryName.split("/");
-      if (parts.length > 1 && parts[0]) {
-        topLevelDirs.add(parts[0]);
-      } else if (!entry.isDirectory) {
-        topLevelFiles.add(parts[0]);
-      }
-    }
+    const indexEntry = meaningful.find(
+      (e) => !e.isDirectory && e.entryName.endsWith("index.html")
+    );
 
-    // If all files are under a single directory and there are no top-level files
-    if (topLevelDirs.size === 1 && topLevelFiles.size === 0) {
-      stripPrefix = [...topLevelDirs][0] + "/";
+    if (indexEntry) {
+      const idx = indexEntry.entryName.lastIndexOf("index.html");
+      stripPrefix = indexEntry.entryName.slice(0, idx); // e.g. "folder/" or "folder/subfolder/" or ""
     }
 
     fs.mkdirSync(uploadsDir, { recursive: true });
 
-    for (const entry of entries) {
+    for (const entry of meaningful) {
       if (entry.isDirectory) continue;
 
       let entryPath = entry.entryName;
@@ -106,7 +110,7 @@ export async function POST(request: NextRequest) {
       // Clean up
       fs.rmSync(uploadsDir, { recursive: true, force: true });
       return NextResponse.json(
-        { error: "ZIP must contain an index.html file at the root level" },
+        { error: "ZIP must contain an index.html file" },
         { status: 400 }
       );
     }
