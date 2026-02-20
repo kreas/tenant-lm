@@ -1,10 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { leadMagnets } from "@/lib/db/schema";
+import { r2Put, r2Exists } from "@/lib/r2";
 import AdmZip from "adm-zip";
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
-import fs from "fs";
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html",
+  ".htm": "text/html",
+  ".css": "text/css",
+  ".js": "application/javascript",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".eot": "application/vnd.ms-fontobject",
+  ".otf": "font/otf",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".pdf": "application/pdf",
+  ".xml": "application/xml",
+  ".txt": "text/plain",
+};
 
 function slugify(text: string): string {
   return text
@@ -37,17 +62,6 @@ export async function POST(request: NextRequest) {
     const id = uuidv4();
     const baseSlug = slugify(name);
     const slug = baseSlug || id.slice(0, 8);
-
-    // Extract ZIP to uploads directory
-    const uploadsDir = path.join(process.cwd(), "uploads", slug);
-
-    // Check if slug already exists on disk
-    if (fs.existsSync(uploadsDir)) {
-      return NextResponse.json(
-        { error: "A lead magnet with a similar name already exists. Please choose a different name." },
-        { status: 409 }
-      );
-    }
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const zip = new AdmZip(buffer);
@@ -84,10 +98,12 @@ export async function POST(request: NextRequest) {
 
     if (indexEntry) {
       const idx = indexEntry.entryName.lastIndexOf("index.html");
-      stripPrefix = indexEntry.entryName.slice(0, idx); // e.g. "folder/" or "folder/subfolder/" or ""
+      stripPrefix = indexEntry.entryName.slice(0, idx);
     }
 
-    fs.mkdirSync(uploadsDir, { recursive: true });
+    // Collect files to upload in memory
+    const filesToUpload: { key: string; data: Buffer; contentType: string }[] = [];
+    let hasIndex = false;
 
     for (const entry of meaningful) {
       if (entry.isDirectory) continue;
@@ -98,22 +114,32 @@ export async function POST(request: NextRequest) {
       }
       if (!entryPath) continue;
 
-      const fullPath = path.join(uploadsDir, entryPath);
-      const dir = path.dirname(fullPath);
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(fullPath, entry.getData());
+      if (entryPath === "index.html") hasIndex = true;
+
+      const ext = path.extname(entryPath).toLowerCase();
+      const contentType = MIME_TYPES[ext] || "application/octet-stream";
+      filesToUpload.push({ key: `${slug}/${entryPath}`, data: entry.getData(), contentType });
     }
 
-    // Verify an index.html exists
-    const hasIndex = fs.existsSync(path.join(uploadsDir, "index.html"));
     if (!hasIndex) {
-      // Clean up
-      fs.rmSync(uploadsDir, { recursive: true, force: true });
       return NextResponse.json(
         { error: "ZIP must contain an index.html file" },
         { status: 400 }
       );
     }
+
+    // Check if slug already exists in R2
+    if (await r2Exists(`${slug}/index.html`)) {
+      return NextResponse.json(
+        { error: "A lead magnet with a similar name already exists. Please choose a different name." },
+        { status: 409 }
+      );
+    }
+
+    // Upload all files to R2
+    await Promise.all(
+      filesToUpload.map(({ key, data, contentType }) => r2Put(key, data, contentType))
+    );
 
     // Insert into database
     const now = new Date();

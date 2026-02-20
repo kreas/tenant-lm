@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";
-import fs from "fs";
+import { r2Get } from "@/lib/r2";
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
@@ -44,16 +44,14 @@ export async function GET(
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  const filePath = path.join(process.cwd(), "uploads", slug, requestedPath);
-
-  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+  const result = await r2Get(`${slug}/${requestedPath}`);
+  if (!result) {
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const content = fs.readFileSync(filePath);
-  const mimeType = getMimeType(filePath);
+  const mimeType = getMimeType(requestedPath);
 
-  return new NextResponse(content, {
+  return new NextResponse(result.body, {
     headers: {
       "Content-Type": mimeType,
       "Cache-Control": "public, max-age=3600",

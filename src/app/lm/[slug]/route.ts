@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import path from "path";
-import fs from "fs";
+import { r2GetBuffer } from "@/lib/r2";
 
 const GTM_HEAD = `<!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
@@ -98,13 +97,12 @@ export async function GET(
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  const indexPath = path.join(process.cwd(), "uploads", slug, "index.html");
-
-  if (!fs.existsSync(indexPath)) {
+  const buffer = await r2GetBuffer(`${slug}/index.html`);
+  if (!buffer) {
     return new NextResponse("Lead magnet not found", { status: 404 });
   }
 
-  let html = fs.readFileSync(indexPath, "utf-8");
+  let html = buffer.toString("utf-8");
   html = injectSnippets(html, slug);
 
   return new NextResponse(html, {

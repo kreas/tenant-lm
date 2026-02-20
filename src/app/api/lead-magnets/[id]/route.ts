@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { leadMagnets, submissions } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
-import fs from "fs";
-import path from "path";
+import { r2DeletePrefix } from "@/lib/r2";
 
 export async function GET(
   _request: NextRequest,
@@ -66,11 +65,8 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Delete uploaded files
-  const uploadsDir = path.join(process.cwd(), "uploads", leadMagnet[0].slug);
-  if (fs.existsSync(uploadsDir)) {
-    fs.rmSync(uploadsDir, { recursive: true, force: true });
-  }
+  // Delete uploaded files from R2
+  await r2DeletePrefix(`${leadMagnet[0].slug}/`);
 
   // Delete submissions first (foreign key)
   await db.delete(submissions).where(eq(submissions.leadMagnetId, id));
