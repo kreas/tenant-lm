@@ -46,14 +46,36 @@ export async function POST(request: NextRequest) {
 
     console.log(`[submission] slug=${slug} lead_magnet=${lm[0].name}`, formData);
 
+    const createdAt = new Date();
+
     await db.insert(submissions).values({
       id,
       leadMagnetId: lm[0].id,
       email,
       name,
       data: JSON.stringify(formData),
-      createdAt: new Date(),
+      createdAt,
     });
+
+    // Fire-and-forget webhook notification
+    const webhookUrl = process.env.WEBHOOK_URL;
+    if (webhookUrl) {
+      fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          slug,
+          leadMagnetName: lm[0].name,
+          email,
+          name,
+          data: formData,
+          createdAt: createdAt.toISOString(),
+        }),
+      }).catch((err) => {
+        console.error("[webhook] Failed to send:", err);
+      });
+    }
 
     return NextResponse.json({ success: true, id });
   } catch (error) {

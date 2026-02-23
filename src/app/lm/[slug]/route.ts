@@ -18,6 +18,72 @@ function formHandlerScript(slug: string): string {
   return `<script>
 (function() {
   var slug = ${JSON.stringify(slug)};
+
+  function labelToKey(text) {
+    return text.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  }
+
+  function getKey(el) {
+    if (el.name) return el.name;
+    if (el.id) return el.id;
+    // Try associated label via for attribute
+    if (el.id) {
+      var lbl = document.querySelector('label[for="' + el.id + '"]');
+      if (lbl) return labelToKey(lbl.textContent);
+    }
+    // Try preceding sibling label or parent label
+    var prev = el.previousElementSibling;
+    if (prev && prev.tagName === 'LABEL') return labelToKey(prev.textContent);
+    var parent = el.closest('label, .form-group, [class*="field"]');
+    if (parent) {
+      var lbl = parent.tagName === 'LABEL' ? parent : parent.querySelector('label');
+      if (lbl) return labelToKey(lbl.textContent);
+    }
+    return '';
+  }
+
+  function collectInputs(container) {
+    var data = {};
+    var inputs = container.querySelectorAll('input, select, textarea');
+    inputs.forEach(function(el) {
+      if (el.type === 'submit' || el.type === 'button' || el.type === 'hidden' || el.type === 'range') return;
+      var key = getKey(el);
+      if (!key) return;
+      var value = el.value;
+      if (el.type === 'checkbox') value = el.checked ? 'yes' : '';
+      if (el.type === 'radio' && !el.checked) return;
+      if (!value) return;
+      if (data[key]) {
+        if (!Array.isArray(data[key])) data[key] = [data[key]];
+        data[key].push(value);
+      } else {
+        data[key] = value;
+      }
+    });
+    return data;
+  }
+
+  function submitData(data, btn) {
+    if (btn) btn.disabled = true;
+    fetch('/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: slug, data: data })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(result) {
+      if (result.success && btn) {
+        btn.textContent = 'Thank you! We\\'ll be in touch.';
+        btn.style.cssText = btn.style.cssText + ';background:#166534;';
+      }
+      if (!result.success && btn) btn.disabled = false;
+    })
+    .catch(function() {
+      if (btn) btn.disabled = false;
+    });
+  }
+
+  // Handle real <form> submit events
   document.addEventListener('submit', function(e) {
     var form = e.target;
     if (!(form instanceof HTMLFormElement)) return;
@@ -35,35 +101,32 @@ function formHandlerScript(slug: string): string {
     });
 
     var submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
-    if (submitBtn) submitBtn.disabled = true;
-
-    fetch('/api/submissions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slug: slug, data: data })
-    })
-    .then(function(res) { return res.json(); })
-    .then(function(result) {
-      if (result.success) {
-        var ty = form.querySelector('[data-thank-you]');
-        if (ty) {
-          form.style.display = 'none';
-          ty.style.display = '';
-        } else {
-          form.reset();
-          var msg = document.createElement('p');
-          msg.textContent = 'Thank you! We\\'ll be in touch.';
-          msg.style.cssText = 'padding:12px;background:#f0fdf4;color:#166534;border-radius:6px;margin-top:8px;text-align:center;';
-          form.appendChild(msg);
-          setTimeout(function() { msg.remove(); }, 5000);
-        }
-      }
-      if (submitBtn) submitBtn.disabled = false;
-    })
-    .catch(function() {
-      if (submitBtn) submitBtn.disabled = false;
-    });
+    submitData(data, submitBtn);
   }, true);
+
+  // Handle pages without <form> tags — override any existing handleSubmit
+  // Use DOMContentLoaded so we run after the page's own scripts are parsed
+  function setupFormlessHandler() {
+    if (document.querySelectorAll('form').length > 0) return;
+    var _origHandleSubmit = window.handleSubmit;
+    window.handleSubmit = function(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      var btn = e && e.target ? e.target : null;
+      var container = btn ? btn.closest('section, [class*="form"], [id*="form"], div') : document.body;
+      var data = collectInputs(container || document.body);
+      if (Object.keys(data).length === 0) data = collectInputs(document.body);
+      submitData(data, btn);
+      if (typeof _origHandleSubmit === 'function') {
+        try { _origHandleSubmit(e); } catch(_) {}
+      }
+    };
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFormlessHandler);
+  } else {
+    setupFormlessHandler();
+  }
 })();
 </script>`;
 }
