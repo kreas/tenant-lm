@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npx tsx src/lib/db/migrate.ts && next build",
     "start": "next start",
     "lint": "eslint",
     "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "npx tsx src/lib/db/migrate.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
